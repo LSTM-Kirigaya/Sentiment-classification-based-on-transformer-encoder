@@ -12,7 +12,6 @@ from neural_network import SentimentFourClassifier
 
 USE_CUDA = torch.cuda.is_available()
 device = torch.device("cuda" if USE_CUDA else "cpu")
-device = "cpu"
 
 # Leslie的Triangle2学习率衰减方法
 def Triangular2(T_max, gamma):
@@ -66,13 +65,23 @@ test_y = y[shuffle_index[split_index:]].tolist()
 LEARNING_RATE = 1e-4
 BATCH_SIZE = 64
 
-print_interval = 10
-save_interval = 50
+print_interval = 100
+save_interval = 500
 
 # 获取网络
-classifier = SentimentFourClassifier(vocab_dim=voc_dict["num_words"])
+classifier = SentimentFourClassifier(vocab_dim=voc_dict["num_words"],
+                                     embedding_dim=512,
+                                     output_dim=4,
+                                     transformer_header_num=4,
+                                     dim_feedforward=1024,
+                                     transformer_encoder_norm=None,
+                                     transformer_layer_num=2,
+                                     gru_hidden_dim=512,
+                                     gru_layers=2,
+                                     gru_dropout=0.1)
+classifier = classifier.to(device)
 # 获取优化器
-optimizer = torch.optim.RMSprop(classifier.parameters(), lr=LEARNING_RATE)
+optimizer = torch.optim.Adam(classifier.parameters(), lr=LEARNING_RATE)
 # 获取损失函数
 loss_func = nn.CrossEntropyLoss(reduction="mean")
 
@@ -95,11 +104,14 @@ for epoch in range(10):
     for batch in loader:
         global_step += 1
         b_x_t, b_x_length, b_y_t = batch
+        b_x_t = b_x_t.to(device)
+        b_x_length = b_x_length.to(device)
+        b_y_t = b_y_t.to(device)
 
-        output = classifier(b_x_t)
+        output = classifier(b_x_t, b_x_length)
         predict_label = torch.argmax(output, 1)
         loss = loss_func(output, b_y_t.flatten())
-        acc = accuracy_score(predict_label.flatten(), b_y_t.flatten())
+        acc = accuracy_score(predict_label.cpu().flatten(), b_y_t.cpu().flatten())
         # 剃度清空
         optimizer.zero_grad()
         # 反向传播
@@ -121,7 +133,7 @@ for epoch in range(10):
                 "model_dict" : classifier.state_dict(),
                 "optimizer" : optimizer,
                 "voc_dict" : voc_dict
-            }, f"./data/{global_step}_model.rar")
+            }, f"./data/checkpoint/checkpoint_{global_step}.rar")
 
     # 测试
     classifier.eval()
@@ -131,9 +143,12 @@ for epoch in range(10):
                         shuffle=True)
     for batch in loader:
         b_x_t, b_x_length, b_y_t = batch
+        b_x_t = b_x_t.to(device)
+        b_x_length = b_x_length.to(device)
+        b_y_t = b_y_t.to(device)
         break
 
-    output = classifier(b_x_t)
+    output = classifier(b_x_t, b_y_t)
     predict_label = torch.argmax(output, 1)
     loss = loss_func(output, b_y_t.flatten())
     acc = accuracy_score(predict_label.flatten(), b_y_t.flatten())
