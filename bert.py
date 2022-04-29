@@ -6,10 +6,11 @@ class BertMoodClassifier(nn.Module):
     pretrained_path = "/mnt/e/Pretrained/Bert/bert-base-chinese/"
     def __init__(self, num_label : int, bert_config : dict, pretrained_bert : bool = True) -> None:
         super().__init__()
+        print("Bert Config:", bert_config)
         if pretrained_bert:
             self.bert_model = BertModel.from_pretrained(self.pretrained_path, config = bert_config)
         else:
-            self.bert_model = BertModel.from_pretrained(config = bert_config)
+            self.bert_model = BertModel(config = bert_config)
         self.classifier = nn.Linear(bert_config.hidden_size, num_label)
             
     def forward(self, input_ids, attention_mask, token_type_ids=None):
@@ -20,7 +21,7 @@ class BertMoodClassifier(nn.Module):
         )
         
         out : torch.Tensor = self.classifier(bert_out[1])
-        return out.softmax(dim=-1)
+        return out
 
 if __name__ == "__main__":
     model_name = 'bert-base-chinese'

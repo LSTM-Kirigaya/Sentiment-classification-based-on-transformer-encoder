@@ -3,16 +3,17 @@ from torch.utils.data import Dataset
 import json
 import typing
 from tqdm import tqdm
-from colossalai.core import global_context
 from colossalai.utils import get_dataloader
 from collections import Counter
 import numpy as np
 import time
-from config import BATCH_SIZE, DEBUG_BATCH_NUM
+from config import BATCH_SIZE, DEBUG_BATCH_NUM, DEBUG_MODE
+from colorama import Back, Style
 
 class SimpleMood4(Dataset):
     def __init__(self, label : torch.Tensor, token_id : torch.Tensor, lengths : torch.Tensor) -> None:
         super().__init__()
+        print(Counter(label.tolist()))
         assert token_id.shape[0] == label.shape[0]
         self.token_id  : torch.Tensor = token_id
         self.label : torch.Tensor = label
@@ -44,7 +45,8 @@ def get_dataset(token_id_path : str, max_length : int = 512, test_size : float =
         for label in all_labels:
             labels += data_json["label"][cur_index : cur_index + each_class_num]
             token_id += data_json["token_id"][cur_index : cur_index + each_class_num]
-            while cur_index < sample_num and data_json["label"][cur_index] != label:
+            cur_index += 1
+            while cur_index < sample_num and data_json["label"][cur_index] == label:
                 cur_index += 1
         data_json["label"] = labels
         data_json["token_id"] = token_id
@@ -108,10 +110,20 @@ def now_str():
         time.localtime()
     )
 
+def debug_out(message):
+    cur_time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    print(Back.BLUE, "[{}]".format(cur_time_str), Style.RESET_ALL, end=" ")
+    print(message)
+
+def error_out(message):
+    cur_time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    print(Back.RED, "[{}]".format(cur_time_str), Style.RESET_ALL, end=" ")
+    print(message)
+
 if __name__ == "__main__":
     train_data_set, test_data_set = get_dataset(
         token_id_path="./data/token_id_4_mood.json",
-        debug_mode=True
+        debug_mode=DEBUG_MODE
     )
 
     train_loader = get_dataloader(
@@ -119,7 +131,7 @@ if __name__ == "__main__":
         shuffle=True,
         batch_size=4,
         pin_memory=True,
-        num_workers=4
+        num_workers=8
     )
 
     test_loader = get_dataloader(
@@ -127,7 +139,7 @@ if __name__ == "__main__":
         shuffle=False,
         batch_size=4,
         pin_memory=True,
-        num_workers=4
+        num_workers=8
     )
 
     train_labels = []
@@ -148,6 +160,5 @@ if __name__ == "__main__":
         # print(labels.shape)
         # print(mask.shape)
 
-    
     print("train allocate situation: {}".format(Counter(train_labels)))
     print("test  allocate situation: {}".format(Counter(test_labels )))

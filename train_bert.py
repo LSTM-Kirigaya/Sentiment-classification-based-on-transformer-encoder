@@ -6,13 +6,14 @@ from transformers import BertConfig
 import torch
 from tqdm import tqdm
 import os
-from config import LEARNING_RATE
+from config import LEARNING_RATE, DEBUG_MODE, LAST_MODEL
+from sklearn.metrics import classification_report, accuracy_score
 
 from bert import BertMoodClassifier
-from dataset import get_dataset, length_to_attention_mask, now_str
+from dataset import get_dataset, length_to_attention_mask, now_str, debug_out, error_out
 
 token_id_path = "./data/token_id_4_mood.json"
-model_name = 'bert-base-chinese'
+model_name = 'bert-base-chinese'    
 checkpoint_dir = "model"
 
 def main():
@@ -25,7 +26,7 @@ def main():
         token_id_path=token_id_path, 
         max_length=512, 
         test_size=0.2,
-        debug_mode=True
+        debug_mode=DEBUG_MODE
         # preshrink=361200
     )
 
@@ -39,7 +40,7 @@ def main():
         dataset=train_dataset,
         shuffle=True,
         pin_memory=True,
-        num_workers=4,
+        num_workers=8,
         batch_size=global_context.config.BATCH_SIZE
     )
 
@@ -47,7 +48,7 @@ def main():
         dataset=test_dataset,
         shuffle=False,
         pin_memory=True,
-        num_workers=4,
+        num_workers=8,
         batch_size=global_context.config.BATCH_SIZE
     )
 
@@ -61,6 +62,15 @@ def main():
         train_dataloader=train_loader,
         test_dataloader=test_loader
     )
+
+    if LAST_MODEL:
+        if os.path.exists(LAST_MODEL):
+            save_model_dir = torch.load(f=LAST_MODEL)
+            engine.model.load_state_dict(save_model_dir["state_dict"])
+            debug_out("successfully load model from {}".format(LAST_MODEL))
+        else:
+            error_out("model path {} doesn't exist!".format(LAST_MODEL))
+            return
 
     logger = get_dist_logger(name="train_bert")
 
@@ -90,36 +100,44 @@ def main():
             engine.step()
    
         engine.eval()
-        correct_num = 0
-        total = 0
+        pre_labs = []
+        ground_truth = []
         for labels, ids, lengths in test_data_loader:
             ids = ids.cuda()
-            labels = labels.cuda()
+            labels : torch.Tensor = labels.cuda()
             masks = length_to_attention_mask(lengths)
             masks = masks.cuda()
             with torch.no_grad():
                 out : torch.Tensor = engine(ids, masks)
+                
                 test_loss : torch.Tensor = engine.criterion(out, labels)
-                pre_lab = out.argmax(dim=-1)
-            correct_num += int(torch.sum(pre_lab == labels))
-            total += labels.shape[0]
+                pre_lab : torch.Tensor = out.argmax(dim=-1)
+            pre_labs += pre_lab.cpu().tolist()
+            ground_truth += labels.cpu().tolist()
+
         # save checkpoint
         stamp = now_str() + ".pth"
         checkpoint_path = os.path.join(checkpoint_dir, stamp)
 
-        torch.save(obj={
-            "state_dict" : engine.model.state_dict()
-        }, f=checkpoint_path)
+        if not DEBUG_MODE:
+            torch.save(obj={
+                "state_dict" : engine.model.state_dict()
+            }, f=checkpoint_path)
 
+        acc = accuracy_score(ground_truth, pre_labs)
         logger.info(
             message="Epoch : {} - train loss : {} - test loss : {} - acc : {}".format(
                 epoch,
                 round(train_loss.item(), 5),
                 round(test_loss.item(), 5),
-                round(correct_num / total, 5)
+                round(acc, 5)
             ),
             ranks=[0]
         )
+        if DEBUG_MODE:
+            print(pre_labs)
+            print(ground_truth)
+        print(classification_report(ground_truth, pre_labs))
 
 if __name__ == "__main__":
     main()
